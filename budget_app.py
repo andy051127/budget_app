@@ -57,11 +57,13 @@ COL_LABELS = {
 # _current_rows 각 원소: (db_id, date, type, category, amount, note)
 COL_IDX = {"date": 1, "type": 2, "category": 3, "amount": 4, "note": 5}
 
-# ── 요약 카드 배경색 ─────────────────────────────────────────
 COLOR_BALANCE = "#0d3d2b"
 COLOR_INCOME  = "#0d2a3d"
 COLOR_EXPENSE = "#3d0d0d"
 COLOR_SAVING  = "#2a0d3d"
+
+# 현재 테마 상태를 전역과 동기화
+IS_DARK_MODE = True
 
 
 # ════════════════════════════════════════════════════════════
@@ -480,7 +482,8 @@ class StatsFrame(ctk.CTkFrame):
         self._table_title.grid(row=0, column=0, sticky="w", padx=14, pady=(8, 4))
 
         # 두 트리뷰가 같은 셀에 겹쳐 배치 → grid_remove 로 전환
-        wrap = tk.Frame(outer, bg="#1e1e2e")
+        self._ov_wrap = tk.Frame(outer, bg="#1e1e2e")
+        wrap = self._ov_wrap
         wrap.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 8))
         wrap.grid_rowconfigure(0, weight=1)
         wrap.grid_columnconfigure(0, weight=1)
@@ -504,7 +507,9 @@ class StatsFrame(ctk.CTkFrame):
         self._ov_tree.configure(yscrollcommand=self._ov_vsb.set)
         self._ov_tree.grid(row=0, column=0, sticky="nsew")
         self._ov_vsb.grid(row=0, column=1, sticky="ns")
-        self._ov_tree.tag_configure("stripe",    background="#252535")
+        # 홀/짝수 행에 따른 가독성 증대 (Striped Rows)
+        self._ov_tree.tag_configure("oddrow",    background="#1e1e2e")
+        self._ov_tree.tag_configure("evenrow",   background="#2a2a35")
         self._ov_tree.tag_configure("total_row", foreground="#90b8f8",
                                      background="#1a1a2e")
 
@@ -529,7 +534,8 @@ class StatsFrame(ctk.CTkFrame):
         self._mo_tree.tag_configure("income_row",  foreground="#4ade80")
         self._mo_tree.tag_configure("expense_row", foreground="#f87171")
         self._mo_tree.tag_configure("saving_row",  foreground="#60a5fa")
-        self._mo_tree.tag_configure("stripe",      background="#252535")
+        self._mo_tree.tag_configure("oddrow",      background="#1e1e2e")
+        self._mo_tree.tag_configure("evenrow",     background="#2a2a35")
 
         # 초기: 전체 통계 트리뷰만 표시
         self._mo_tree.grid_remove()
@@ -641,11 +647,11 @@ class StatsFrame(ctk.CTkFrame):
             sav = int(row.get("저축", 0))
             running  = running + inc - exp
             t_inc += inc; t_exp += exp; t_sav += sav
-            tags = ("stripe",) if i % 2 == 1 else ()
+            bg_tag = "evenrow" if i % 2 == 1 else "oddrow"
             self._ov_tree.insert("", "end",
                                   values=(month, f"{inc:,}", f"{exp:,}",
                                           f"{sav:,}", f"{running:,}"),
-                                  tags=tags)
+                                  tags=(bg_tag,))
 
         # 합계 행
         self._ov_tree.insert("", "end",
@@ -670,11 +676,11 @@ class StatsFrame(ctk.CTkFrame):
             ratio = f"{row['total']/denom*100:.1f}%" if denom > 0 else "—"
             ctag  = {"수입": "income_row", "지출": "expense_row",
                      "저축": "saving_row"}.get(row["type"], "")
-            tags  = (ctag, "stripe") if i % 2 == 1 else (ctag,)
+            bg_tag = "evenrow" if i % 2 == 1 else "oddrow"
             self._mo_tree.insert("", "end",
                                   values=(row["type"], row["category"],
                                           f"{int(row['total']):,} 원", ratio),
-                                  tags=tags)
+                                  tags=(ctag, bg_tag))
 
     # ════════════════════════════════════════════════════════
     # 차트 그리기
@@ -748,12 +754,18 @@ class StatsFrame(ctk.CTkFrame):
         self._fig.tight_layout(pad=1.5)
         self._canvas.draw()
 
-    def _single_bar(self, ax, df, title, color):
+    def _single_bar(self, ax, df, title, base_color):
         """단일 막대 그래프 헬퍼 – 금액 내림차순 정렬된 df 수신"""
         cats = df["category"].tolist()
         vals = df["total"].tolist()
+        
+        # matplotlib의 colormap 적용 (분류별로 다른 색상)
+        import matplotlib.pyplot as plt
+        cmap = plt.get_cmap("Pastel1" if base_color == "#f87171" else "Pastel2")
+        colors = [cmap(i % 8) for i in range(len(cats))]
+
         bars = ax.bar(range(len(cats)), vals,
-                       color=color, alpha=0.82, width=0.6,
+                       color=colors, alpha=0.82, width=0.6,
                        edgecolor="#1e1e2e", linewidth=0.5)
 
         # 막대 위에 금액 표시
@@ -783,6 +795,24 @@ class StatsFrame(ctk.CTkFrame):
         for sp in ax.spines.values():
             sp.set_visible(False)
         self._canvas.draw()
+
+    def update_theme(self, is_dark):
+        """테마 전환 시 통계 뷰의 컨테이너 색상 및 내부 데이터 강제 반영"""
+        bg_main = "#1e1e2e" if is_dark else "#f2f2f5"
+        bg_even = "#2a2a35" if is_dark else "#e5e5eb"
+        fg_main = "#e0e0e0" if is_dark else "#202020"
+
+        if hasattr(self, '_ov_wrap'):
+            self._ov_wrap.configure(bg=bg_main)
+            
+        self._ov_tree.tag_configure("oddrow",    background=bg_main)
+        self._ov_tree.tag_configure("evenrow",   background=bg_even)
+        self._mo_tree.tag_configure("oddrow",    background=bg_main)
+        self._mo_tree.tag_configure("evenrow",   background=bg_even)
+        
+        self._fig.set_facecolor(bg_main)
+        # 차트 새로고침 유도
+        self.refresh()
 
     def cleanup(self):
         """앱 종료 시 Figure 메모리 해제"""
@@ -824,7 +854,7 @@ class BudgetApp(ctk.CTk):
         self.stats_frame = None   # StatsFrame 참조 (통계 탭)
 
         # ── 창 설정 ──────────────────────────────────────────
-        self.title("💰 심플 가계부")
+        self.title("💰 가계부")
         self.geometry("1340x840")
         self.minsize(980, 680)
 
@@ -881,6 +911,19 @@ class BudgetApp(ctk.CTk):
                 font=ctk.CTkFont(size=14), text_color="#888888",
             ).grid(row=0, column=0)
 
+        # ── ⚙️ 설정 탭 ───────────────────────────────────────
+        settings_tab = self.tabview.add("⚙️ 설정")
+        settings_tab.grid_columnconfigure(0, weight=1)
+        
+        sf = ctk.CTkFrame(settings_tab, corner_radius=10)
+        sf.pack(padx=20, pady=20, fill="x")
+        
+        ctk.CTkLabel(sf, text="화면 테마 설정", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=20, pady=(20, 5))
+        
+        self.theme_var = ctk.StringVar(value="Dark" if IS_DARK_MODE else "Light")
+        ctk.CTkRadioButton(sf, text="다크 모드", variable=self.theme_var, value="Dark", command=self._change_theme).pack(anchor="w", padx=30, pady=5)
+        ctk.CTkRadioButton(sf, text="라이트 모드", variable=self.theme_var, value="Light", command=self._change_theme).pack(anchor="w", padx=30, pady=(5, 20))
+
         self.tabview.set("📒 가계부")
 
     # ════════════════════════════════════════════════════════
@@ -889,7 +932,7 @@ class BudgetApp(ctk.CTk):
     def _build_left_panel(self):
         p = self.left_panel
 
-        ctk.CTkLabel(p, text="💰 심플 가계부",
+        ctk.CTkLabel(p, text="💰 가계부",
                      font=ctk.CTkFont(size=21, weight="bold"),
                      text_color="#f0f0f0").pack(pady=(22, 6), padx=20)
         ctk.CTkFrame(p, height=1, fg_color="#3a3a3a").pack(fill="x", padx=18, pady=4)
@@ -1115,31 +1158,41 @@ class BudgetApp(ctk.CTk):
     # Treeview 스타일 & 위젯 생성
     # ════════════════════════════════════════════════════════
     def _apply_treeview_style(self, font_size=11):
-        """다크 테마 스타일 적용 – font_size 변경 시 재호출 가능"""
+        """환경과 테마(Dark/Light)에 맞춘 Treeview 스타일 동적 갱신"""
+        global IS_DARK_MODE
         style = ttk.Style()
         style.theme_use("clam")
         row_height = max(24, int(font_size * 2.6))
+        
+        bg_main = "#1e1e2e" if IS_DARK_MODE else "#ffffff"
+        fg_main = "#e0e0e0" if IS_DARK_MODE else "#101010"
+        bg_head = "#18182d" if IS_DARK_MODE else "#f0f0f5"
+        fg_head = "#90b8f8" if IS_DARK_MODE else "#2c3e50"
+        bg_sel = "#1f4e8c" if IS_DARK_MODE else "#3498db"
 
+        # 데이터 표(Treeview) 전체에 대한 외곽선(borderwidth)을 추가하여 영역 구분을 명확히 함
+        # (ttk.Treeview 특성상 데이터 셀 내부의 세로 격자선(Grid lines)을 기본 지원하지 않으므로, 
+        # 하단에서 구현한 행별 교차 색상(Striped Rows)과 결합하여 가독성을 극대화합니다)
         style.configure("Treeview",
-                         background="#1e1e2e", foreground="#e0e0e0",
-                         fieldbackground="#1e1e2e", borderwidth=0,
+                         background=bg_main, foreground=fg_main,
+                         fieldbackground=bg_main, borderwidth=1, relief="solid",
                          rowheight=row_height, font=("Malgun Gothic", font_size))
 
+        # 헤더 경계선: 표 상단의 제목 부분과 아래 데이터 영역 사이를 더 뚜렷하고 입체적인 경계선으로 구분
         style.configure("Treeview.Heading",
-                         background="#12122a", foreground="#90b8f8",
+                         background=bg_head, foreground=fg_head,
                          font=("Malgun Gothic", 11, "bold"),
-                         relief="flat", borderwidth=0)
+                         relief="raised", borderwidth=1)
 
         style.map("Treeview",
-                  background=[("selected", "#1f4e8c")],
+                  background=[("selected", bg_sel)],
                   foreground=[("selected", "#ffffff")])
         style.map("Treeview.Heading",
-                  background=[("active", "#1a1a3a")])
-
-        # (DateEntry 제거됨 - DatePickerButton 으로 대체)
+                  background=[("active", "#1a1a3a" if IS_DARK_MODE else "#e5e5e5")])
 
     def _build_treeview(self):
-        container = tk.Frame(self.list_frame, bg="#1e1e2e")
+        self._tree_container = tk.Frame(self.list_frame, bg="#1e1e2e" if IS_DARK_MODE else "#ffffff")
+        container = self._tree_container
         container.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
         container.grid_rowconfigure(0, weight=1)
         container.grid_columnconfigure(0, weight=1)
@@ -1177,7 +1230,9 @@ class BudgetApp(ctk.CTk):
         self.tree.tag_configure("income",  foreground="#4ade80")
         self.tree.tag_configure("expense", foreground="#f87171")
         self.tree.tag_configure("saving",  foreground="#60a5fa")
-        self.tree.tag_configure("stripe",  background="#252535")
+        # 가독성을 높이기 위한 교차 행 배경(Striped Rows) 태그 추가
+        self.tree.tag_configure("oddrow",  background="#1e1e2e")
+        self.tree.tag_configure("evenrow", background="#2a2a35")
         self.tree.tag_configure("empty",   foreground="#555555")
 
         self.tree.bind("<<TreeviewSelect>>", self._on_tree_select)
@@ -1221,6 +1276,32 @@ class BudgetApp(ctk.CTk):
     def _on_tab_change(self):
         if self.tabview.get() == "📊 통계" and self.stats_frame:
             self.stats_frame.refresh()
+
+    def _change_theme(self):
+        global IS_DARK_MODE
+        mode = self.theme_var.get()
+        IS_DARK_MODE = (mode == "Dark")
+        ctk.set_appearance_mode(mode)
+        
+        # update colors for Treeview standard container and styles
+        if hasattr(self, '_tree_container'):
+            self._tree_container.configure(bg="#1e1e2e" if IS_DARK_MODE else "#ffffff")
+            
+        self._apply_treeview_style(int(self.font_slider.get()))
+        self._update_theme_tags()
+        self._render_rows(self._current_rows)
+        
+        if self.stats_frame:
+            self.stats_frame.update_theme(IS_DARK_MODE)
+
+    def _update_theme_tags(self):
+        global IS_DARK_MODE
+        bg_main = "#1e1e2e" if IS_DARK_MODE else "#ffffff"
+        bg_even = "#2a2a35" if IS_DARK_MODE else "#f9f9fb"
+        fg_empty = "#555555" if IS_DARK_MODE else "#888888"
+        self.tree.tag_configure("oddrow",  background=bg_main)
+        self.tree.tag_configure("evenrow", background=bg_even)
+        self.tree.tag_configure("empty",   foreground=fg_empty)
 
     # 조회 버튼: 연도/월 필터 적용
     def _on_query(self):
@@ -1457,12 +1538,12 @@ class BudgetApp(ctk.CTk):
             # seq: 화면 표시용 순번 (항상 1부터 연속)
             # row_id: DB PK → iid로 저장하여 선택 시 복원
             color_tag = {"수입": "income", "지출": "expense", "저축": "saving"}.get(tp, "")
-            tags      = (color_tag, "stripe") if seq % 2 == 0 else (color_tag,)
+            bg_tag    = "evenrow" if seq % 2 == 0 else "oddrow"
 
             self.tree.insert("", "end",
                              iid=str(row_id),          # iid = DB PK (문자열)
                              values=(seq, dt, tp, cat, f"{amt:,} 원", note or ""),
-                             tags=tags)
+                             tags=(color_tag, bg_tag))
 
     def update_summary(self, year=None, month=None):
         income, expense, saving = self.db.get_summary(year=year, month=month)
